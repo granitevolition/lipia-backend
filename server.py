@@ -22,8 +22,8 @@ def find_available_port():
     s.close()
     return None
 
-def main():
-    """Main entry point for the application"""
+def init():
+    """Initialize the application"""
     print(f"Starting Lipia Subscription Service")
     print(f"MongoDB URI: {config.MONGO_URI}")
     
@@ -46,9 +46,13 @@ def main():
     else:
         print("Could not find available port for callback server")
     
+    return True
+
+# Initialize application
+init()
+
+# This is needed for Gunicorn to find the app
+if __name__ == '__main__':
     # Start Flask application
     print(f"Starting Flask server on port {config.PORT}")
     app.run(host='0.0.0.0', port=config.PORT, debug=config.DEBUG)
-
-if __name__ == '__main__':
-    main()
