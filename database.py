@@ -1,30 +1,121 @@
 from pymongo import MongoClient
 from datetime import datetime
+import os
 import config
 
-# Create MongoDB client
-client = MongoClient(config.MONGO_URI)
-db = client[config.MONGO_DB_NAME]
+# Get MongoDB connection string
+mongo_uri = os.environ.get('MONGO_URL', config.MONGO_URI)
 
-# Collection references
-users_collection = db['users']
-payments_collection = db['payments']
-transactions_collection = db['transactions']
+# Create MongoDB client
+try:
+    print(f"Connecting to MongoDB at: {mongo_uri}")
+    client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+    
+    # Test connection
+    client.admin.command('ping')
+    print("MongoDB connection successful")
+    
+    # Set database
+    db = client[config.MONGO_DB_NAME]
+    
+    # Collection references
+    users_collection = db['users']
+    payments_collection = db['payments']
+    transactions_collection = db['transactions']
+    
+except Exception as e:
+    print(f"MongoDB connection error: {e}")
+    # Create fallback in-memory collections for development
+    print("Using in-memory collections for development")
+    from pymongo.collection import Collection
+    
+    class InMemoryCollection:
+        def __init__(self, name):
+            self.name = name
+            self.data = []
+            self._id_counter = 1
+            
+        def insert_one(self, document):
+            document['_id'] = self._id_counter
+            self._id_counter += 1
+            self.data.append(document)
+            return type('obj', (object,), {'inserted_id': document['_id']})
+            
+        def find_one(self, query):
+            for doc in self.data:
+                match = True
+                for k, v in query.items():
+                    if k not in doc or doc[k] != v:
+                        match = False
+                        break
+                if match:
+                    return doc
+            return None
+            
+        def find(self, query=None):
+            if query is None:
+                return self.data
+            results = []
+            for doc in self.data:
+                match = True
+                for k, v in query.items():
+                    if k not in doc or doc[k] != v:
+                        match = False
+                        break
+                if match:
+                    results.append(doc)
+            return results
+            
+        def update_one(self, query, update):
+            doc = self.find_one(query)
+            if doc:
+                for k, v in update.get('$set', {}).items():
+                    doc[k] = v
+                return type('obj', (object,), {'modified_count': 1})
+            return type('obj', (object,), {'modified_count': 0})
+            
+        def create_index(self, key, **kwargs):
+            pass
+            
+        def count_documents(self, query):
+            return len(self.find(query))
+            
+    users_collection = InMemoryCollection('users')
+    payments_collection = InMemoryCollection('payments')
+    transactions_collection = InMemoryCollection('transactions')
+    
+    # Add a default admin user
+    users_collection.insert_one({
+        'username': 'admin',
+        'pin': '1234',
+        'words_remaining': 1000,
+        'phone_number': '0712345678',
+        'created_at': datetime.now(),
+        'updated_at': datetime.now()
+    })
 
 # Initialize collections with indexes
 def init_db():
-    # Create indexes for users collection
-    users_collection.create_index("username", unique=True)
-    users_collection.create_index("phone_number")
-    
-    # Create indexes for payments collection
-    payments_collection.create_index("username")
-    payments_collection.create_index("checkout_id")
-    payments_collection.create_index("reference")
-    
-    # Create indexes for transactions collection
-    transactions_collection.create_index("transaction_id", unique=True)
-    transactions_collection.create_index("username")
+    """Initialize the database with required indexes"""
+    try:
+        # Create indexes for users collection
+        users_collection.create_index("username", unique=True)
+        users_collection.create_index("phone_number")
+        
+        # Create indexes for payments collection
+        payments_collection.create_index("username")
+        payments_collection.create_index("checkout_id")
+        payments_collection.create_index("reference")
+        
+        # Create indexes for transactions collection
+        transactions_collection.create_index("transaction_id", unique=True)
+        transactions_collection.create_index("username")
+        
+        print("Database indexes created successfully")
+        return True
+    except Exception as e:
+        print(f"Error creating database indexes: {e}")
+        return False
 
 # User functions
 def user_exists(username):
@@ -177,6 +268,3 @@ def update_transaction_status(transaction_id, status, reference=None):
     )
     
     return result.modified_count > 0
-
-# Initialize database with indexes
-init_db()
